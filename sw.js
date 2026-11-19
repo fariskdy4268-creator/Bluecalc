@@ -1,10 +1,10 @@
 /* BlueCalc service worker: app shell stays on the device (works offline);
    rule pages are kept after first view or after "Save all pages offline". */
-const SHELL = 'bluecalc-shell-de5ace68ca';
+const SHELL = 'bluecalc-shell-6a65327a3c';
 const PDF = 'bluecalc-pdf';
 const CORE = ['./', './index.html', './manifest.webmanifest', './apple-touch-icon.png', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(SHELL).then(c => c.addAll(CORE)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(SHELL).then(c => c.addAll(CORE.map(u => new Request(u, {cache: 'reload'})))).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== SHELL && k !== PDF).map(k => caches.delete(k))))

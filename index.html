@@ -2054,7 +2054,8 @@ if(typeof module!=='undefined' && module.exports) module.exports = api; else roo
 
 </script>
 <script>
-window.BC_APP = true; window.BC_PDFS = {"bi_bv_b": 1, "bi_rina_b": 1, "bi_abs_p3": 1, "bi_irs": 2, "bi_solas": 1, "bi_marpol": 1, "bi_illc": 1, "bi_itc": 1, "bi_igc": 1, "bi_ibc": 1, "bi_modu": 1, "bi_hsc": 1, "bi_lsa": 1, "bi_is": 1, "bi_c1281": 1, "bi_sps": 1, "bi_evac": 1, "bi_mlc": 1, "bi_gcc": 1, "bi_ilo": 1, "bi_aisc": 1, "bi_ongc": 1, "bi_spm": 1};
+window.BC_APP = true; window.BC_VER = "2026-11-19 10:09"; window.BC_PDFS = {"bi_bv_b": 2, "bi_rina_b": 2, "bi_abs_p3": 3, "bi_irs": 5, "bi_solas": 1, "bi_marpol": 1, "bi_illc": 1, "bi_itc": 1, "bi_igc": 1, "bi_ibc": 1, "bi_modu": 1, "bi_hsc": 1, "bi_lsa": 1, "bi_is": 1, "bi_c1281": 1, "bi_sps": 1, "bi_evac": 1, "bi_mlc": 1, "bi_gcc": 1, "bi_ilo": 1, "bi_aisc": 2, "bi_ongc": 1, "bi_spm": 1}; window.BC_PDF_BYTES = {"bi_bv_b": 11274279, "bi_rina_b": 10979143, "bi_abs_p3": 17749897, "bi_irs": 37137161, "bi_solas": 1398638, "bi_marpol": 3613638, "bi_illc": 933737, "bi_itc": 707788, "bi_igc": 5634735, "bi_ibc": 756564, "bi_modu": 815558, "bi_hsc": 17700, "bi_lsa": 2090022, "bi_is": 814970, "bi_c1281": 1014580, "bi_sps": 218619, "bi_evac": 418760, "bi_mlc": 1063451, "bi_gcc": 637062, "bi_ilo": 256938, "bi_aisc": 8200318, "bi_ongc": 277897, "bi_spm": 3013044};
+(function(){ const t0 = Date.now(); if(navigator.serviceWorker) navigator.serviceWorker.addEventListener('controllerchange', ()=>{ if(Date.now() - t0 < 15000 && !sessionStorage.bcReloaded){ sessionStorage.bcReloaded = 1; location.reload(); } }); })();
 if('serviceWorker' in navigator && /^https?:/.test(location.protocol)) addEventListener('load', ()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
 
 /* ======================================================================
@@ -2335,7 +2336,7 @@ function renderHome(){
    fetched on first view and kept by the service worker for offline use */
 const APP_PDFS = window.BC_PDFS || null;
 const PDF_CACHE = 'bluecalc-pdf';
-const appParts = id => Array.from({length: APP_PDFS[id]}, (_, i) => `pdf/${id}_${i}.pdf`);
+const appParts = id => Array.from({length: APP_PDFS[id]}, (_, i) => `pdf/${id}-${i}.pdf`);
 async function fetchAppPdf(id){
   const bufs = [];
   for(const u of appParts(id)){
@@ -2352,20 +2353,44 @@ async function appSaved(id){
   try{ const c = await caches.open(PDF_CACHE); for(const u of appParts(id)) if(!(await c.match(u))) return false; return true; }catch(e){ return false; }
 }
 async function saveAllOffline(btn, note){
-  const ids = Object.keys(APP_PDFS); let done = 0;
-  btn.disabled = true;
-  try{ if(navigator.storage && navigator.storage.persist) await navigator.storage.persist(); }catch(_){}
+  const ids = Object.keys(APP_PDFS).sort((a, b) => (window.BC_PDF_BYTES[a] || 0) - (window.BC_PDF_BYTES[b] || 0));  // small books first
+  const total = ids.reduce((a, id) => a + (window.BC_PDF_BYTES[id] || 0), 0), MB = x => (x / 1048576).toFixed(0);
+  const label = id => mgr && mgr.querySelector(`.rb-app[data-app="${id}"]`);
+  btn.disabled = true; btn.textContent = 'Saving\u2026';
+  note.textContent = `Starting\u2026 0 of ${MB(total)} MB. Keep BlueCalc open and the screen on until it finishes.`;
+  try{ if(navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(()=>{}); }catch(_){}
+  let c;
+  try{ c = await caches.open(PDF_CACHE); }
+  catch(e){ note.textContent = 'This browser does not allow offline storage here. Open BlueCalc from its Home Screen icon (not a private Safari tab) and try again.'; btn.disabled = false; btn.textContent = 'Save all pages offline'; return; }
+  let done = 0, books = 0, cur = '';
   try{
-    const c = await caches.open(PDF_CACHE);
     for(const id of ids){
-      for(const u of appParts(id)) if(!(await c.match(u))) await c.add(u);
-      done++; note.textContent = `Saving rule pages for offline use… ${done} / ${ids.length} books`;
+      cur = id; const name = (bookOf(id) || {}).society || id;
+      for(const u of appParts(id)){
+        const have = await c.match(u);
+        if(have){ done += (await have.blob()).size; continue; }
+        const r = await fetch(u, {cache: 'no-store'});
+        if(!r.ok) throw Object.assign(new Error('http'), {status: r.status, file: u});
+        const rd = r.body.getReader(), parts = []; let got = 0;
+        for(;;){
+          const {done: end, value} = await rd.read(); if(end) break;
+          parts.push(value); got += value.length;
+          note.textContent = `Saving ${name}\u2026 ${MB(done + got)} of ${MB(total)} MB (${books} of ${ids.length} books done). Keep the screen on.`;
+        }
+        await c.put(u, new Response(new Blob(parts), {headers: {'Content-Type': 'application/pdf'}}));
+        done += got;
+      }
+      books++; const el = label(id); if(el) el.textContent = 'Saved offline \u2713';
+      note.textContent = `Saved ${books} of ${ids.length} books \u2014 ${MB(done)} of ${MB(total)} MB.`;
     }
     note.textContent = 'All rule pages are saved on this device and open without internet.';
-    btn.textContent = 'Saved ✓';
+    btn.textContent = 'Saved \u2713';
   }catch(e){
-    note.textContent = `Stopped after ${done} of ${ids.length} books — check the connection and tap again to continue.`;
-    btn.disabled = false;
+    const kept = books ? ` The ${books} books already saved are kept.` : '';
+    if(e && e.status) note.textContent = `Could not download ${e.file} (error ${e.status}). The "pdf" folder may be missing from the website \u2014 check that it was uploaded to GitHub with all its files, then tap again.` + kept;
+    else if(e && e.name === 'QuotaExceededError') note.textContent = 'The phone did not allow more storage for BlueCalc. Free some space on the iPhone and tap again.' + kept;
+    else note.textContent = `Download stopped at ${MB(done)} of ${MB(total)} MB (connection lost or the app was closed). Tap again to continue.` + kept;
+    btn.disabled = false; btn.textContent = 'Continue saving';
   }
 }
 async function getDoc(id){
@@ -2750,7 +2775,7 @@ async function openManager(){
   const st = mgr.querySelector('#rbStore');
   st.textContent = 'Built-in rules are part of this file and always available. ' + (dbOk ? 'Linked PDFs and extra books are kept in this browser.' : 'Linked PDFs and extra books last until the page is closed here.');
   if(APP_PDFS){
-    st.textContent = 'Original pages open from the app files and are kept on this device after the first view.';
+    st.textContent = 'Original pages open from the app files and are kept on this device after the first view. App version ' + (window.BC_VER || '') + '.';
     let box = mgr.querySelector('#rbOffline');
     if(!box){
       box = document.createElement('div'); box.id = 'rbOffline'; box.className = 'rb-offline';
